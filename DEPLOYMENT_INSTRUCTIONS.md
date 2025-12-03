@@ -1,51 +1,98 @@
-# GitHub Pages デプロイ手順
+# GitHub Desktop でのデプロイ手順
 
-## 1. Git初期化とコミット
+## ステップ1: GitHub Desktop のインストール
 
-コマンドプロンプト（cmd）を開いて、以下のコマンドを順番に実行してください：
+1. https://desktop.github.com/ にアクセス
+2. **Download for Windows** をクリック
+3. ダウンロードしたファイルを実行してインストール
+4. インストール後、GitHub Desktopを開く
 
-```bash
-cd c:\Users\cerve\OneDrive\デスクトップ\AntiGravity\recipe-saver
+## ステップ2: GitHubアカウントでサインイン
 
-git init
+1. GitHub Desktopを開く
+2. **File** → **Options** → **Accounts**
+3. **Sign in** をクリックしてGitHubアカウントでサインイン
 
-git add .
+## ステップ3: ローカルリポジトリを作成
 
-git commit -m "Initial commit: Recipe Saver with AI extraction"
+1. **File** → **Add local repository** をクリック
+2. **Choose...** をクリックして以下のフォルダを選択：
+   ```
+   c:\Users\cerve\OneDrive\デスクトップ\AntiGravity\recipe-saver
+   ```
+3. 「This directory does not appear to be a Git repository」と表示されたら、**create a repository** をクリック
+4. Repository name: `recipe-saver`
+5. **Create repository** をクリック
 
-git branch -M main
+## ステップ4: 初回コミット
 
-git remote add origin https://github.com/cervelo874-dev/recipe-saver.git
+GitHub Desktopの左下に変更されたファイル一覧が表示されます。
 
-git push -u origin main
-```
+1. 左下の **Summary** 欄に：`Initial commit: Recipe Saver with AI extraction`
+2. **Commit to main** ボタンをクリック
 
-## 2. GitHub Secretsの設定
+## ステップ5: GitHubに公開（Publish）
 
-1. https://github.com/cervelo874-dev/recipe-saver/settings/secrets/actions にアクセス
+1. 上部の **Publish repository** ボタンをクリック
+2. 設定画面で：
+   - Name: `recipe-saver`
+   - Description: （任意）`AI-powered recipe saving app`
+   - ☑ **Keep this code private** のチェックを**外す**（公開する場合）
+3. **Publish repository** をクリック
+
+これで https://github.com/cervelo874-dev/recipe-saver にコードがアップロードされます！
+
+---
+
+## 次のステップ: GitHub Secretsの設定
+
+リポジトリが公開されたら、以下を行ってください：
+
+### 1. APIキーをSecretsに追加
+
+1. ブラウザで以下にアクセス：
+   https://github.com/cervelo874-dev/recipe-saver/settings/secrets/actions
+
 2. **New repository secret** をクリック
-3. Name: `VITE_GEMINI_API_KEY`
-4. Value: あなたのGemini APIキー（.envファイルから）を貼り付け
-5. **Add secret** をクリック
 
-## 3. GitHub Pagesの設定
+3. 入力：
+   - **Name**: `VITE_GEMINI_API_KEY`
+   - **Secret**: あなたのGemini APIキー
+     （`.env`ファイルから`VITE_GEMINI_API_KEY=`の後の部分をコピー）
 
-1. https://github.com/cervelo874-dev/recipe-saver/settings/pages にアクセス
-2. **Source**: **GitHub Actions** を選択
-3. 保存（自動保存されます）
+4. **Add secret** をクリック
 
-## 4. デプロイの確認
+### 2. GitHub Pagesを有効化
 
-1. https://github.com/cervelo874-dev/recipe-saver/actions にアクセス
-2. "Deploy to GitHub Pages" ワークフローが実行中/完了したことを確認
-3. 完了後、https://cervelo874-dev.github.io/recipe-saver/ でアプリにアクセス
+1. ブラウザで以下にアクセス：
+   https://github.com/cervelo874-dev/recipe-saver/settings/pages
+
+2. **Source** を **GitHub Actions** に変更
+
+3. 自動的に保存されます
+
+### 3. デプロイを確認
+
+1. ブラウザで以下にアクセス：
+   https://github.com/cervelo874-dev/recipe-saver/actions
+
+2. 「Deploy to GitHub Pages」ワークフローが実行されていることを確認
+
+3. 完了（緑のチェックマーク）したら、以下でアプリにアクセス：
+   **https://cervelo874-dev.github.io/recipe-saver/**
+
+---
 
 ## トラブルシューティング
 
-### Gitコマンドが認識されない場合
-- Git Bashを使用してください
-- または、GitHub Desktopアプリを使用できます
-
 ### デプロイが失敗する場合
-- GitHub Actionsのログを確認
-- VITE_GEMINI_API_KEYが正しく設定されているか確認
+- Actionsタブでエラーログを確認
+- `VITE_GEMINI_API_KEY` が正しく設定されているか確認
+
+### アプリが動かない場合
+- ブラウザのコンソール（F12）でエラーを確認
+- APIキーが正しいか確認
+
+---
+
+完了したら教えてください！🎉
