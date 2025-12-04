@@ -1,6 +1,6 @@
 import './Header.css'
 
-export default function Header({ onAddClick, onLogoClick, searchQuery, onSearchChange }) {
+export default function Header({ onAddClick, onLogoClick, searchQuery, onSearchChange, onExport, onImport }) {
     return (
         <header className="header">
             <div className="header-content container">
@@ -29,6 +29,26 @@ export default function Header({ onAddClick, onLogoClick, searchQuery, onSearchC
                 </div>
 
                 <div className="header-right">
+                    {/* Export/Import Buttons */}
+                    <button
+                        className="btn btn-ghost icon-btn"
+                        onClick={onExport}
+                        title="データをエクスポート"
+                        aria-label="データをエクスポート"
+                    >
+                        <span className="btn-icon">💾</span>
+                    </button>
+
+                    <button
+                        className="btn btn-ghost icon-btn"
+                        onClick={onImport}
+                        title="データをインポート"
+                        aria-label="データをインポート"
+                    >
+                        <span className="btn-icon">📂</span>
+                    </button>
+
+                    {/* Add Recipe Button */}
                     <button
                         className="btn btn-primary add-recipe-btn"
                         onClick={onAddClick}

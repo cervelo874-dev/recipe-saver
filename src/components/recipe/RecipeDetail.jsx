@@ -1,6 +1,14 @@
+import { useEffect } from 'react'
 import './RecipeDetail.css'
 
-export default function RecipeDetail({ recipe, onEdit, onDelete, onBack }) {
+export default function RecipeDetail({ recipe, onEdit, onDelete, onBack, onIncrementView }) {
+    // Increment view count when recipe is opened
+    useEffect(() => {
+        if (onIncrementView && recipe.id) {
+            onIncrementView(recipe.id)
+        }
+    }, [recipe.id, onIncrementView])
+
     const formatDate = (dateString) => {
         const date = new Date(dateString)
         return date.toLocaleDateString('ja-JP', {

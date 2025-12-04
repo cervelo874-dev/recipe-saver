@@ -1,9 +1,14 @@
 import './RecipeCard.css'
 
-export default function RecipeCard({ recipe, onClick }) {
+export default function RecipeCard({ recipe, onClick, onToggleFavorite }) {
     const formatDate = (dateString) => {
         const date = new Date(dateString)
         return date.toLocaleDateString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric' })
+    }
+
+    const handleFavoriteClick = (e) => {
+        e.stopPropagation() // Prevent card click event
+        onToggleFavorite(recipe.id)
     }
 
     return (
@@ -23,6 +28,15 @@ export default function RecipeCard({ recipe, onClick }) {
                         <span className="placeholder-icon">🍽️</span>
                     </div>
                 )}
+
+                {/* Favorite Button */}
+                <button
+                    className={`favorite-btn ${recipe.isFavorite ? 'active' : ''}`}
+                    onClick={handleFavoriteClick}
+                    aria-label={recipe.isFavorite ? 'お気に入りから削除' : 'お気に入りに追加'}
+                >
+                    ★
+                </button>
 
                 {recipe.rating && (
                     <div className="recipe-rating">

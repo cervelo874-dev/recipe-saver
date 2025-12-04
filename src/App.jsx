@@ -11,10 +11,14 @@ function App() {
         recipes,
         addRecipe,
         updateRecipe,
-        deleteRecipe
+        deleteRecipe,
+        toggleFavorite,
+        incrementViewCount,
+        exportRecipes,
+        importRecipes
     } = useRecipes()
 
-    const [currentView, setCurrentView] = useState('list') // 'list', 'add', 'detail'
+    const [currentView, setCurrentView] = useState('list') // 'list', 'add', 'detail', 'edit'
     const [selectedRecipe, setSelectedRecipe] = useState(null)
     const [searchQuery, setSearchQuery] = useState('')
     const [filterTag, setFilterTag] = useState(null)
@@ -44,12 +48,37 @@ function App() {
         setCurrentView('list')
     }
 
-    // Filter recipes based on search and tags
+    const handleExport = () => {
+        exportRecipes()
+    }
+
+    const handleImport = () => {
+        const input = document.createElement('input')
+        input.type = 'file'
+        input.accept = 'application/json'
+        input.onchange = (e) => {
+            const file = e.target.files[0]
+            if (file) {
+                const reader = new FileReader()
+                reader.onload = (event) => {
+                    const result = importRecipes(event.target.result)
+                    if (result.success) {
+                        alert(`${result.count}件のレシピをインポートしました！`)
+                    } else {
+                        alert(`インポートに失敗しました: ${result.error}`)
+                    }
+                }
+                reader.readAsText(file)
+            }
+        }
+        input.click()
+    }
+
+    // Filter recipes based on search
     const filteredRecipes = recipes.filter(recipe => {
         const matchesSearch = recipe.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
             recipe.ingredients.some(ing => ing.toLowerCase().includes(searchQuery.toLowerCase()))
-        const matchesTag = !filterTag || recipe.tags.includes(filterTag)
-        return matchesSearch && matchesTag
+        return matchesSearch
     })
 
     // Get all unique tags
@@ -62,6 +91,8 @@ function App() {
                 onLogoClick={() => setCurrentView('list')}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
+                onExport={handleExport}
+                onImport={handleImport}
             />
 
             <main className="main-content">
@@ -70,6 +101,7 @@ function App() {
                         <RecipeList
                             recipes={filteredRecipes}
                             onRecipeClick={handleViewRecipe}
+                            onToggleFavorite={toggleFavorite}
                             filterTag={filterTag}
                             onFilterChange={setFilterTag}
                             allTags={allTags}
@@ -97,6 +129,7 @@ function App() {
                             onEdit={() => handleEditRecipe(selectedRecipe)}
                             onDelete={() => handleDeleteRecipe(selectedRecipe.id)}
                             onBack={() => setCurrentView('list')}
+                            onIncrementView={incrementViewCount}
                         />
                     )}
                 </div>

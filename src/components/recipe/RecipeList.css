@@ -7,6 +7,9 @@
     margin-bottom: var(--spacing-xl);
     padding-bottom: var(--spacing-md);
     border-bottom: 1px solid var(--color-border);
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-md);
 }
 
 .filter-tags {
@@ -24,18 +27,147 @@
     background-color: var(--color-surface);
     color: var(--color-text-secondary);
     cursor: pointer;
-    transition: all var(--transition-fast);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.filter-tag::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(230, 81, 0, 0.1), transparent);
+    transition: left 0.5s;
+}
+
+.filter-tag:hover::before {
+    left: 100%;
 }
 
 .filter-tag:hover {
     border-color: var(--color-primary);
     color: var(--color-primary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(230, 81, 0, 0.15);
 }
 
 .filter-tag.active {
-    background-color: var(--color-primary);
+    background: linear-gradient(135deg, var(--color-primary) 0%, #D64700 100%);
     border-color: var(--color-primary);
     color: white;
+    box-shadow: 0 4px 16px rgba(230, 81, 0, 0.3);
+    transform: translateY(-2px);
+}
+
+.filter-tag.active:hover {
+    box-shadow: 0 6px 20px rgba(230, 81, 0, 0.4);
+}
+
+/* Filter Controls */
+.filter-controls {
+    display: flex;
+    gap: var(--spacing-md);
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.favorites-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm) var(--spacing-lg);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    border: 2px solid rgba(255, 215, 0, 0.3);
+    border-radius: var(--radius-full);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 1), rgba(255, 250, 240, 0.95));
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+.favorites-toggle:hover {
+    border-color: #FFD700;
+    color: #B8860B;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(255, 215, 0, 0.2);
+}
+
+.favorites-toggle.active {
+    background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+    border-color: #FFD700;
+    color: white;
+    box-shadow: 0 4px 20px rgba(255, 215, 0, 0.4);
+    transform: translateY(-2px);
+}
+
+.favorites-toggle .star-icon {
+    font-size: var(--font-size-xl);
+    transition: transform 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+.favorites-toggle:hover .star-icon {
+    transform: rotate(20deg) scale(1.1);
+}
+
+.favorites-toggle.active .star-icon {
+    animation: star-pulse 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+}
+
+@keyframes star-pulse {
+
+    0%,
+    100% {
+        transform: scale(1) rotate(0deg);
+    }
+
+    25% {
+        transform: scale(1.2) rotate(-10deg);
+    }
+
+    50% {
+        transform: scale(1.3) rotate(10deg);
+    }
+
+    75% {
+        transform: scale(1.2) rotate(-5deg);
+    }
+}
+
+.sort-select {
+    padding: var(--spacing-sm) var(--spacing-lg);
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+    border: 2px solid var(--color-border);
+    border-radius: var(--radius-full);
+    background: linear-gradient(135deg, var(--color-surface) 0%, rgba(230, 81, 0, 0.02) 100%);
+    color: var(--color-text-primary);
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    appearance: none;
+    background-image:
+        linear-gradient(135deg, var(--color-surface) 0%, rgba(230, 81, 0, 0.02) 100%),
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 9L1 4h10z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat, no-repeat;
+    background-position: left center, right 12px center;
+    padding-right: 40px;
+}
+
+.sort-select:hover {
+    border-color: var(--color-primary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(230, 81, 0, 0.15);
+}
+
+.sort-select:focus {
+    outline: none;
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 4px rgba(230, 81, 0, 0.1);
 }
 
 /* Recipe Grid */
@@ -96,5 +228,15 @@
     .filter-tag {
         padding: var(--spacing-xs) var(--spacing-sm);
         font-size: var(--font-size-xs);
+    }
+
+    .filter-controls {
+        width: 100%;
+    }
+
+    .favorites-toggle,
+    .sort-select {
+        flex: 1;
+        min-width: 0;
     }
 }
