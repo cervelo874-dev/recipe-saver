@@ -43,6 +43,49 @@ const recipeSchema = {
     required: ['title', 'ingredients', 'steps']
 }
 
+// スクリーンショット画像解析用のスキーマ（ベスト画像インデックスを含む）
+const recipeFromImageSchema = {
+    type: SchemaType.OBJECT,
+    properties: {
+        title: {
+            type: SchemaType.STRING,
+            description: 'レシピの料理名'
+        },
+        description: {
+            type: SchemaType.STRING,
+            description: 'レシピの概要や魅力の簡単な説明（1〜2文）'
+        },
+        servings: {
+            type: SchemaType.STRING,
+            description: '分量・人数（例: 2人分、4個分など。不明なら空文字）'
+        },
+        cookTime: {
+            type: SchemaType.STRING,
+            description: '目安の調理時間（例: 15分、30分など。不明なら空文字）'
+        },
+        ingredients: {
+            type: SchemaType.ARRAY,
+            items: { type: SchemaType.STRING },
+            description: '画像内のテロップや文字から読み取った材料名と分量のリスト'
+        },
+        steps: {
+            type: SchemaType.ARRAY,
+            items: { type: SchemaType.STRING },
+            description: '画像内のテロップや説明から読み取った調理手順のリスト'
+        },
+        tags: {
+            type: SchemaType.ARRAY,
+            items: { type: SchemaType.STRING },
+            description: '料理ジャンルや特徴タグ（例: 和食, 時短, 簡単 など）'
+        },
+        bestImageIndex: {
+            type: SchemaType.INTEGER,
+            description: 'アップロードされた画像のうち、完成した料理の見た目（メイン写真）として最も適している画像の0から始まるインデックス番号（0〜4）。文字のみ等で料理写真が見当たらない場合は -1'
+        }
+    },
+    required: ['title', 'ingredients', 'steps']
+}
+
 function createModel(genAI, modelName, schema = recipeSchema) {
     return genAI.getGenerativeModel({
         model: modelName,
@@ -64,12 +107,10 @@ async function generateWithFallback(genAI, primaryModelName, executeFn) {
         const errorMsg = primaryError.message || String(primaryError)
         console.warn(`⚠️ Model [${primaryModelName}] failed (${errorMsg}). Checking fallback...`)
 
-        // 既に gemini-2.5-flash の場合はそのまま再スロー
         if (primaryModelName === 'gemini-2.5-flash') {
             throw primaryError
         }
 
-        // 429 (Quota exceeded) や 404 (Not found) などの場合は gemini-2.5-flash で即座にリトライ
         console.log('🔄 Automatically falling back to stable model: gemini-2.5-flash...')
         try {
             return await executeFn('gemini-2.5-flash')
@@ -208,6 +249,71 @@ ${text}
         return normalizeRecipeData(parsed)
     } catch (error) {
         console.error('AI Extraction Error (Text):', error)
+        throw formatAiError(error)
+    }
+}
+
+/**
+ * スクリーンショット画像（複数枚）からレシピ情報を抽出
+ * @param {Array<{ base64Data: string, mimeType: string, previewUrl?: string }>} images
+ */
+export async function extractRecipeFromImages(images = []) {
+    if (!images || images.length === 0) {
+        throw new Error('解析する画像を選択してください')
+    }
+
+    const apiKey = getApiKey()
+    if (!apiKey) {
+        throw new Error('Gemini APIキーが設定されていません。画面右上の「設定」からAPIキーを入力してください。')
+    }
+
+    const genAI = new GoogleGenerativeAI(apiKey)
+    const primaryModelName = getSelectedModel()
+
+    const prompt = `
+あなたはプロの料理レシピ抽出アシスタントです。
+Instagram、TikTok、YouTubeショート、料理本やメモなどからスクリーンショットされた画像（計${images.length}枚）が提供されています。
+画像内のテロップ、文字、材料表、調理手順、および料理の見た目から、レシピ情報を正確に読み取って抽出してください。
+
+【指示】
+1. 複数の画像に情報が分散している場合（例: 1枚目に材料、2枚目に手順、3枚目に完成品など）、それらを統合して1つのまとまったレシピを作成してください。
+2. 材料名と分量を漏れなく抽出してください。
+3. 手順は分かりやすく順序立てて記述してください。
+4. 提供された画像（0番〜${images.length - 1}番）のうち、完成した料理の写真として最も見栄えが良いものの番号を bestImageIndex に返してください。文字のみ等で料理写真が見当たらない場合は -1 としてください。
+`
+
+    const parts = [prompt]
+    for (let i = 0; i < images.length; i++) {
+        const img = images[i]
+        parts.push({
+            inlineData: {
+                data: img.base64Data,
+                mimeType: img.mimeType || 'image/jpeg'
+            }
+        })
+    }
+
+    try {
+        console.log(`Sending ${images.length} images to Gemini API (model: ${primaryModelName})...`)
+        const parsed = await generateWithFallback(genAI, primaryModelName, async (modelName) => {
+            const model = createModel(genAI, modelName, recipeFromImageSchema)
+            const result = await model.generateContent(parts)
+            const responseText = result.response.text()
+            return JSON.parse(responseText)
+        })
+
+        const normalized = normalizeRecipeData(parsed)
+        const bestIdx = typeof parsed.bestImageIndex === 'number' && parsed.bestImageIndex >= 0 && parsed.bestImageIndex < images.length
+            ? parsed.bestImageIndex
+            : 0
+
+        return {
+            ...normalized,
+            bestImageIndex: bestIdx,
+            selectedImageUrl: images[bestIdx]?.previewUrl || ''
+        }
+    } catch (error) {
+        console.error('AI Image Extraction Error:', error)
         throw formatAiError(error)
     }
 }

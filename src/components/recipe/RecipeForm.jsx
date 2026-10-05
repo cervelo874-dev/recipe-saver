@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { fetchMetadata } from '../../utils/fetchMetadata'
-import { extractRecipeFromText } from '../../utils/extractRecipeWithAI'
+import { extractRecipeFromText, extractRecipeFromImages } from '../../utils/extractRecipeWithAI'
 import { hasApiKey } from '../../utils/apiKey'
 import './RecipeForm.css'
 
@@ -19,13 +19,19 @@ export default function RecipeForm({ recipe, onSubmit, onCancel, onOpenSettings 
         memo: ''
     })
 
-    const [aiMode, setAiMode] = useState('url') // 'url' or 'text'
+    const [aiMode, setAiMode] = useState('url') // 'url', 'text', 'image'
     const [textInput, setTextInput] = useState('')
+    const [screenshots, setScreenshots] = useState([]) // Array of { id, previewUrl, base64Data, mimeType }
+    const [isDragging, setIsDragging] = useState(false)
+    const [selectedMainImageId, setSelectedMainImageId] = useState(null)
+
     const [tagInput, setTagInput] = useState('')
     const [isLoadingAI, setIsLoadingAI] = useState(false)
     const [aiError, setAiError] = useState('')
     const [aiSuccess, setAiSuccess] = useState('')
+
     const fileInputRef = useRef(null)
+    const screenshotInputRef = useRef(null)
 
     const keyConfigured = hasApiKey()
 
@@ -47,6 +53,32 @@ export default function RecipeForm({ recipe, onSubmit, onCancel, onOpenSettings 
             })
         }
     }, [recipe])
+
+    // クリップボードからの画像ペースト（Ctrl + V）の監視
+    useEffect(() => {
+        if (aiMode !== 'image') return
+
+        const handlePaste = async (e) => {
+            const items = e.clipboardData?.items
+            if (!items) return
+
+            const imageFiles = []
+            for (let i = 0; i < items.length; i++) {
+                if (items[i].type.startsWith('image/')) {
+                    const file = items[i].getAsFile()
+                    if (file) imageFiles.push(file)
+                }
+            }
+
+            if (imageFiles.length > 0) {
+                e.preventDefault()
+                await addScreenshotFiles(imageFiles)
+            }
+        }
+
+        window.addEventListener('paste', handlePaste)
+        return () => window.removeEventListener('paste', handlePaste)
+    }, [aiMode, screenshots])
 
     const handleChange = (field, value) => {
         setFormData(prev => ({ ...prev, [field]: value }))
@@ -92,7 +124,7 @@ export default function RecipeForm({ recipe, onSubmit, onCancel, onOpenSettings 
         }))
     }
 
-    // 画像ファイルアップロード（Base64変換）
+    // 料理写真の手動アップロード（Base64変換）
     const handleImageFileChange = (e) => {
         const file = e.target.files?.[0]
         if (!file) return
@@ -102,9 +134,8 @@ export default function RecipeForm({ recipe, onSubmit, onCancel, onOpenSettings 
             return
         }
 
-        // 5MB制限
-        if (file.size > 5 * 1024 * 1024) {
-            alert('画像サイズは5MB以下にしてください')
+        if (file.size > 8 * 1024 * 1024) {
+            alert('画像サイズは8MB以下にしてください')
             return
         }
 
@@ -113,6 +144,72 @@ export default function RecipeForm({ recipe, onSubmit, onCancel, onOpenSettings 
             handleChange('imageUrl', event.target.result)
         }
         reader.readAsDataURL(file)
+    }
+
+    // スクショ画像ファイルの追加処理（最大5枚）
+    const addScreenshotFiles = async (files) => {
+        const remainingSlots = 5 - screenshots.length
+        if (remainingSlots <= 0) {
+            setAiError('スクショ画像は一度に最大5枚まで追加できます')
+            return
+        }
+
+        const filesToProcess = Array.from(files).slice(0, remainingSlots)
+        const newScreenshots = []
+
+        for (const file of filesToProcess) {
+            if (!file.type.startsWith('image/')) continue
+
+            try {
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const reader = new FileReader()
+                    reader.onload = (e) => resolve(e.target.result)
+                    reader.onerror = reject
+                    reader.readAsDataURL(file)
+                })
+
+                const base64Data = dataUrl.split(',')[1]
+                const item = {
+                    id: crypto.randomUUID(),
+                    previewUrl: dataUrl,
+                    base64Data,
+                    mimeType: file.type || 'image/jpeg'
+                }
+                newScreenshots.push(item)
+            } catch (err) {
+                console.error('Failed to read image:', err)
+            }
+        }
+
+        if (newScreenshots.length > 0) {
+            setScreenshots(prev => [...prev, ...newScreenshots])
+            setAiError('')
+            setAiSuccess(`${newScreenshots.length}枚のスクショを追加しました`)
+            setTimeout(() => setAiSuccess(''), 2500)
+        }
+    }
+
+    const handleRemoveScreenshot = (id) => {
+        setScreenshots(prev => prev.filter(s => s.id !== id))
+        if (selectedMainImageId === id) {
+            setSelectedMainImageId(null)
+        }
+    }
+
+    const handleSelectMainImage = (shot) => {
+        setSelectedMainImageId(shot.id)
+        handleChange('imageUrl', shot.previewUrl)
+        setAiSuccess('メイン料理写真に設定しました！')
+        setTimeout(() => setAiSuccess(''), 2000)
+    }
+
+    const handleDrop = async (e) => {
+        e.preventDefault()
+        setIsDragging(false)
+        const files = Array.from(e.dataTransfer?.files || []).filter(f => f.type.startsWith('image/'))
+        if (files.length > 0) {
+            await addScreenshotFiles(files)
+        }
     }
 
     // AI抽出（URL）
@@ -154,6 +251,40 @@ export default function RecipeForm({ recipe, onSubmit, onCancel, onOpenSettings 
             setAiSuccess('テキストからレシピ情報を抽出しました！')
         } catch (error) {
             setAiError(error.message || 'テキストからの抽出に失敗しました')
+        } finally {
+            setIsLoadingAI(false)
+        }
+    }
+
+    // AI抽出（スクショ画像）
+    const handleExtractFromImages = async () => {
+        if (screenshots.length === 0) {
+            setAiError('スクショ画像を1枚以上選択または貼り付けてください')
+            return
+        }
+
+        setIsLoadingAI(true)
+        setAiError('')
+        setAiSuccess('')
+
+        try {
+            const data = await extractRecipeFromImages(screenshots)
+            applyExtractedData(data)
+
+            // AIが判定したベスト写真を料理写真に設定
+            if (data.bestImageIndex >= 0 && screenshots[data.bestImageIndex]) {
+                const bestShot = screenshots[data.bestImageIndex]
+                setSelectedMainImageId(bestShot.id)
+                handleChange('imageUrl', bestShot.previewUrl)
+            } else if (screenshots.length > 0 && !formData.imageUrl) {
+                // 判定できなかった場合は1枚目をデフォルト設定
+                setSelectedMainImageId(screenshots[0].id)
+                handleChange('imageUrl', screenshots[0].previewUrl)
+            }
+
+            setAiSuccess('スクショ画像からレシピを解析しました！料理写真も自動設定されました。')
+        } catch (error) {
+            setAiError(error.message || 'スクショ画像からの抽出に失敗しました')
         } finally {
             setIsLoadingAI(false)
         }
@@ -203,7 +334,7 @@ export default function RecipeForm({ recipe, onSubmit, onCancel, onOpenSettings 
                 <h1>{recipe ? 'レシピを編集' : '新しいレシピを追加'}</h1>
             </div>
 
-            {/* AI Assistant Section */}
+            {/* AI Assistant Card */}
             <div className="ai-assistant-card">
                 <div className="ai-assistant-header">
                     <span className="ai-badge">🤖 AIアシスタント</span>
@@ -240,9 +371,17 @@ export default function RecipeForm({ recipe, onSubmit, onCancel, onOpenSettings 
                     >
                         📋 テキスト・SNSメモから
                     </button>
+                    <button
+                        type="button"
+                        className={`ai-tab ${aiMode === 'image' ? 'active' : ''}`}
+                        onClick={() => { setAiMode('image'); setAiError(''); setAiSuccess(''); }}
+                    >
+                        📸 スクショ画像から
+                    </button>
                 </div>
 
-                {aiMode === 'url' ? (
+                {/* Tab 1: URL */}
+                {aiMode === 'url' && (
                     <div className="ai-panel">
                         <div className="url-input-row">
                             <input
@@ -263,7 +402,10 @@ export default function RecipeForm({ recipe, onSubmit, onCancel, onOpenSettings 
                         </div>
                         <p className="ai-hint">料理ブログやレシピサイトのURLを入力すると、材料や手順をAIが自動抽出します。</p>
                     </div>
-                ) : (
+                )}
+
+                {/* Tab 2: Text */}
+                {aiMode === 'text' && (
                     <div className="ai-panel">
                         <textarea
                             className="textarea"
@@ -280,6 +422,86 @@ export default function RecipeForm({ recipe, onSubmit, onCancel, onOpenSettings 
                                 disabled={isLoadingAI || !textInput.trim()}
                             >
                                 {isLoadingAI ? '解析中...' : 'テキストから抽出'}
+                            </button>
+                        </div>
+                    </div>
+                )}
+
+                {/* Tab 3: Screenshot Images */}
+                {aiMode === 'image' && (
+                    <div className="ai-panel">
+                        <div
+                            className={`screenshot-dropzone ${isDragging ? 'dragging' : ''}`}
+                            onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                            onDragLeave={() => setIsDragging(false)}
+                            onDrop={handleDrop}
+                            onClick={() => screenshotInputRef.current?.click()}
+                        >
+                            <input
+                                ref={screenshotInputRef}
+                                type="file"
+                                accept="image/*"
+                                multiple
+                                style={{ display: 'none' }}
+                                onChange={(e) => e.target.files && addScreenshotFiles(e.target.files)}
+                            />
+                            <span className="dropzone-icon">📷</span>
+                            <div className="dropzone-text">
+                                <strong>タップして写真を選択</strong> またはドラッグ＆ドロップ
+                            </div>
+                            <div className="dropzone-hint">
+                                ※ PCは画面上で <strong>Ctrl + V</strong> でも直接貼り付け可能（最大5枚）
+                            </div>
+                        </div>
+
+                        {/* Screenshots Thumbnail List */}
+                        {screenshots.length > 0 && (
+                            <div className="screenshot-previews-container">
+                                <div className="screenshot-previews-header">
+                                    <span className="screenshots-count">選択中のスクショ ({screenshots.length}/5枚):</span>
+                                    <span className="screenshots-subhint">★をクリックで完成料理写真に指定できます</span>
+                                </div>
+                                <div className="screenshot-thumbnails-grid">
+                                    {screenshots.map((shot, idx) => {
+                                        const isMain = selectedMainImageId === shot.id || formData.imageUrl === shot.previewUrl
+                                        return (
+                                            <div
+                                                key={shot.id}
+                                                className={`screenshot-thumb-card ${isMain ? 'is-main-photo' : ''}`}
+                                            >
+                                                <img src={shot.previewUrl} alt={`スクショ ${idx + 1}`} />
+                                                <div className="thumb-index-tag">#{idx + 1}</div>
+                                                <button
+                                                    type="button"
+                                                    className="thumb-delete-btn"
+                                                    onClick={(e) => { e.stopPropagation(); handleRemoveScreenshot(shot.id); }}
+                                                    title="削除"
+                                                >
+                                                    ✕
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className={`thumb-set-main-btn ${isMain ? 'active' : ''}`}
+                                                    onClick={() => handleSelectMainImage(shot)}
+                                                    title="料理のメイン写真に指定"
+                                                >
+                                                    {isMain ? '★ メイン写真' : '☆ メインに設定'}
+                                                </button>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="ai-panel-actions mt-sm">
+                            <button
+                                type="button"
+                                className="btn btn-primary"
+                                onClick={handleExtractFromImages}
+                                disabled={isLoadingAI || screenshots.length === 0}
+                            >
+                                {isLoadingAI ? 'AI解析中 (画像認識)...' : `スクショから解析する (${screenshots.length}枚)`}
                             </button>
                         </div>
                     </div>
@@ -349,7 +571,7 @@ export default function RecipeForm({ recipe, onSubmit, onCancel, onOpenSettings 
                                 className="input"
                                 value={formData.imageUrl}
                                 onChange={(e) => handleChange('imageUrl', e.target.value)}
-                                placeholder="画像URL（https://...）"
+                                placeholder="画像URL（または下のボタンで写真選択）"
                             />
                             <button
                                 type="button"
