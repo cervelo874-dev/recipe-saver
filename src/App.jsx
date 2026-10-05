@@ -22,7 +22,7 @@ function App() {
     const [currentView, setCurrentView] = useState('list') // 'list', 'add', 'detail', 'edit'
     const [selectedRecipe, setSelectedRecipe] = useState(null)
     const [searchQuery, setSearchQuery] = useState('')
-    const [filterTag, setFilterTag] = useState(null)
+    const [selectedTags, setSelectedTags] = useState([])
     const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
     const handleAddRecipe = (recipe) => {
@@ -114,8 +114,8 @@ function App() {
                             recipes={filteredRecipes}
                             onRecipeClick={handleViewRecipe}
                             onToggleFavorite={toggleFavorite}
-                            filterTag={filterTag}
-                            onFilterChange={setFilterTag}
+                            selectedTags={selectedTags}
+                            onTagsChange={setSelectedTags}
                             allTags={allTags}
                         />
                     )}
