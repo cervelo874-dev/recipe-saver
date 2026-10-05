@@ -71,7 +71,34 @@
     font-size: 0.875rem;
     color: #666;
     line-height: 1.5;
-    margin-bottom: 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.model-select-wrapper {
+    margin-bottom: 0.5rem;
+}
+
+.model-select {
+    width: 100%;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #1a1a1a;
+    background-color: #fafafa;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    transition: all 0.2s;
+}
+
+.model-select:focus {
+    border-color: #ff6b35;
+    background-color: #ffffff;
+    box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.15);
+}
+
+.mt-md {
+    margin-top: 1.25rem;
 }
 
 .status-badge-container {

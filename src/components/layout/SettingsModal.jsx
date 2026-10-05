@@ -1,9 +1,18 @@
 import { useState, useEffect } from 'react'
-import { getApiKey, setApiKey, isCustomApiKey } from '../../utils/apiKey'
+import {
+    getApiKey,
+    setApiKey,
+    isCustomApiKey,
+    getSelectedModel,
+    setSelectedModel,
+    AVAILABLE_MODELS,
+    DEFAULT_MODEL
+} from '../../utils/apiKey'
 import './SettingsModal.css'
 
 export default function SettingsModal({ isOpen, onClose }) {
     const [inputKey, setInputKey] = useState('')
+    const [selectedModel, setModel] = useState(DEFAULT_MODEL)
     const [showKey, setShowKey] = useState(false)
     const [savedMessage, setSavedMessage] = useState('')
     const [hasCustom, setHasCustom] = useState(false)
@@ -12,6 +21,7 @@ export default function SettingsModal({ isOpen, onClose }) {
     useEffect(() => {
         if (isOpen) {
             setInputKey(localStorage.getItem('gemini_api_key') || '')
+            setModel(getSelectedModel())
             setHasCustom(isCustomApiKey())
             setHasEnv(Boolean(import.meta.env.VITE_GEMINI_API_KEY))
             setSavedMessage('')
@@ -23,12 +33,13 @@ export default function SettingsModal({ isOpen, onClose }) {
     const handleSave = (e) => {
         e.preventDefault()
         setApiKey(inputKey)
+        setSelectedModel(selectedModel)
         setHasCustom(Boolean(inputKey.trim()))
         setSavedMessage('設定を保存しました！')
         setTimeout(() => {
             setSavedMessage('')
             onClose()
-        }, 1200)
+        }, 1000)
     }
 
     const handleClear = () => {
@@ -50,25 +61,46 @@ export default function SettingsModal({ isOpen, onClose }) {
                 </div>
 
                 <div className="modal-body">
-                    <section className="settings-section">
-                        <h3>🔑 Google Gemini API キー</h3>
-                        <p className="settings-description">
-                            AIによるレシピ自動抽出（URL解析・テキスト解析）に使用します。
-                            入力されたキーはお使いのブラウザ（LocalStorage）にのみ保存され、外部サーバーには送信されません。
-                        </p>
+                    <form onSubmit={handleSave}>
+                        {/* Model Selection Section */}
+                        <section className="settings-section">
+                            <h3>🤖 使用するGeminiモデル</h3>
+                            <p className="settings-description">
+                                レシピ抽出に使用するモデルを選択します。最新のGemini 3.8 Flashや高速・軽量なLiteモデルをご利用いただけます。
+                            </p>
+                            <div className="model-select-wrapper">
+                                <select
+                                    className="input model-select"
+                                    value={selectedModel}
+                                    onChange={(e) => setModel(e.target.value)}
+                                >
+                                    {AVAILABLE_MODELS.map(m => (
+                                        <option key={m.id} value={m.id}>
+                                            {m.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+                        </section>
 
-                        <div className="status-badge-container">
-                            <span className="status-label">現在の状態:</span>
-                            {hasCustom ? (
-                                <span className="status-badge status-active">✓ ブラウザ保存キー有効</span>
-                            ) : hasEnv ? (
-                                <span className="status-badge status-env">✓ .envキー有効</span>
-                            ) : (
-                                <span className="status-badge status-missing">未設定（AI機能は利用不可）</span>
-                            )}
-                        </div>
+                        {/* API Key Section */}
+                        <section className="settings-section mt-md">
+                            <h3>🔑 Google Gemini API キー</h3>
+                            <p className="settings-description">
+                                入力されたキーはお使いのブラウザ（LocalStorage）にのみ安全に保存され、外部サーバーには送信されません。
+                            </p>
 
-                        <form onSubmit={handleSave} className="api-key-form">
+                            <div className="status-badge-container">
+                                <span className="status-label">現在の状態:</span>
+                                {hasCustom ? (
+                                    <span className="status-badge status-active">✓ ブラウザ保存キー有効</span>
+                                ) : hasEnv ? (
+                                    <span className="status-badge status-env">✓ .envキー有効</span>
+                                ) : (
+                                    <span className="status-badge status-missing">未設定（AI機能は利用不可）</span>
+                                )}
+                            </div>
+
                             <div className="input-group">
                                 <input
                                     type={showKey ? 'text' : 'password'}
@@ -118,8 +150,8 @@ export default function SettingsModal({ isOpen, onClose }) {
                                     </button>
                                 </div>
                             </div>
-                        </form>
-                    </section>
+                        </section>
+                    </form>
                 </div>
             </div>
         </div>

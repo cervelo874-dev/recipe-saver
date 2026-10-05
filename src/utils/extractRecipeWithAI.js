@@ -1,5 +1,5 @@
 import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai'
-import { getApiKey } from './apiKey.js'
+import { getApiKey, getSelectedModel } from './apiKey.js'
 
 const recipeSchema = {
     type: SchemaType.OBJECT,
@@ -49,9 +49,10 @@ function getGenerativeModel(schema = recipeSchema) {
         throw new Error('Gemini APIキーが設定されていません。画面右上の「設定」からAPIキーを入力してください。')
     }
 
+    const modelName = getSelectedModel()
     const genAI = new GoogleGenerativeAI(apiKey)
     return genAI.getGenerativeModel({
-        model: 'gemini-2.5-flash',
+        model: modelName,
         generationConfig: {
             responseMimeType: 'application/json',
             responseSchema: schema,
@@ -71,9 +72,10 @@ export async function extractRecipeFromUrlWithSearch(url) {
         throw new Error('Gemini APIキーが設定されていません。画面右上の「設定」からAPIキーを入力してください。')
     }
 
+    const modelName = getSelectedModel()
     const genAI = new GoogleGenerativeAI(apiKey)
     const searchModel = genAI.getGenerativeModel({
-        model: 'gemini-2.5-flash',
+        model: modelName,
         tools: [{ googleSearch: {} }]
     })
 
