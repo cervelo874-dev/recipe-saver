@@ -1,23 +1,27 @@
-import { extractRecipeWithAI } from './extractRecipeWithAI'
+import { extractRecipeWithAI, extractRecipeFromUrlWithSearch } from './extractRecipeWithAI.js'
+import { hasApiKey } from './apiKey.js'
 
 // List of CORS proxies to try in order
 const CORS_PROXIES = [
     {
-        name: 'allOrigins',
+        name: 'allOriginsRaw',
+        urlTemplate: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+    },
+    {
+        name: 'allOriginsGet',
         urlTemplate: (url) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`
     },
     {
-        name: 'corsproxy.io',
-        urlTemplate: (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`
-    },
-    {
-        name: 'api.codetabs',
+        name: 'codetabs',
         urlTemplate: (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
     }
 ]
 
 /**
- * Fetch metadata from a URL using a CORS proxy and AI extraction
+ * Fetch recipe metadata from a URL.
+ * Prioritizes Gemini's Google Search Grounding for CORS-immune web extraction,
+ * with fallbacks to CORS proxies and HTML parsing.
+ *
  * @param {string} url - The URL to fetch metadata from
  * @returns {Promise<Object>} - Extracted metadata
  */
@@ -26,31 +30,56 @@ export async function fetchMetadata(url) {
         throw new Error('有効なURLを入力してください')
     }
 
+    const apiKeyConfigured = hasApiKey()
+
+    // 1. First priority: Try Gemini Google Search Grounding (Immune to CORS & proxy blocks)
+    if (apiKeyConfigured) {
+        try {
+            console.log('🤖 Attempting AI extraction via Google Search Grounding...')
+            const searchData = await extractRecipeFromUrlWithSearch(url)
+            if (searchData && searchData.title) {
+                console.log('✅ Google Search Grounding extraction successful!', {
+                    title: searchData.title,
+                    ingredients: searchData.ingredients?.length || 0,
+                    steps: searchData.steps?.length || 0
+                })
+                return {
+                    ...searchData,
+                    url
+                }
+            }
+        } catch (searchError) {
+            console.warn('⚠️ Google Search Grounding failed, trying CORS proxy fallback:', searchError.message)
+        }
+    }
+
+    // 2. Second priority: Try fetching HTML via CORS proxies
     let html = null
     let lastError = null
 
-    // Try each proxy until one succeeds
     for (const proxy of CORS_PROXIES) {
         try {
             console.log(`Trying ${proxy.name} proxy...`)
             const proxyUrl = proxy.urlTemplate(url)
 
-            const response = await fetch(proxyUrl)
+            const controller = new AbortController()
+            const timeoutId = setTimeout(() => controller.abort(), 6000)
+
+            const response = await fetch(proxyUrl, { signal: controller.signal })
+            clearTimeout(timeoutId)
+
             if (!response.ok) {
                 throw new Error(`${proxy.name} returned ${response.status}`)
             }
 
-            // Different proxies return different formats
-            if (proxy.name === 'allOrigins') {
+            if (proxy.name === 'allOriginsGet') {
                 const data = await response.json()
                 html = data.contents
-            } else if (proxy.name === 'corsproxy.io') {
-                html = await response.text()
-            } else if (proxy.name === 'api.codetabs') {
+            } else {
                 html = await response.text()
             }
 
-            if (html) {
+            if (html && html.trim().length > 100) {
                 console.log(`Successfully fetched HTML using ${proxy.name}`)
                 break
             }
@@ -61,66 +90,44 @@ export async function fetchMetadata(url) {
         }
     }
 
-    if (!html) {
-        throw new Error(`URLからの情報取得に失敗しました。別のURLを試してください。\nエラー: ${lastError?.message || '不明'}`)
-    }
-
-    try {
-        // Check if API key is configured
-        const hasApiKey = import.meta.env.VITE_GEMINI_API_KEY
-        console.log(`API Key status: ${hasApiKey ? 'CONFIGURED ✓' : 'NOT CONFIGURED ✗'}`)
-
-        // Try AI extraction first if API key is configured
-        if (hasApiKey) {
+    // 3. Process HTML if fetched
+    if (html) {
+        if (apiKeyConfigured) {
             try {
-                console.log('🤖 Attempting AI extraction...')
+                console.log('🤖 Attempting HTML AI extraction...')
                 const aiData = await extractRecipeWithAI(html, url)
                 if (aiData && aiData.title) {
-                    console.log('✅ AI extraction successful!', {
-                        title: aiData.title,
-                        ingredients: aiData.ingredients?.length || 0,
-                        steps: aiData.steps?.length || 0,
-                        tags: aiData.tags?.length || 0
-                    })
                     return {
                         ...aiData,
-                        url // Ensure original URL is preserved
+                        url
                     }
                 }
             } catch (aiError) {
-                console.error('❌ AI extraction failed:', aiError)
-                console.warn('Falling back to metadata extraction...')
-                // Continue to fallback
+                console.warn('HTML AI extraction failed, using DOM fallback:', aiError.message)
             }
-        } else {
-            console.warn('⚠️ Gemini API key not configured. Using fallback metadata extraction only.')
         }
 
-        // Fallback: Parse HTML to extract metadata (standard tags)
-        console.log('Using fallback metadata extraction...')
+        // DOM Fallback
         const parser = new DOMParser()
         const doc = parser.parseFromString(html, 'text/html')
-
-        // Extract metadata with fallbacks
-        const metadata = {
-            title: extractTitle(doc),
-            description: extractDescription(doc),
-            imageUrl: extractImage(doc, url),
+        return {
+            title: extractTitle(doc) || '無題のレシピ',
+            description: extractDescription(doc) || '',
+            imageUrl: extractImage(doc, url) || '',
             url: url,
-            ingredients: [''], // Standard metadata doesn't provide ingredients
-            steps: ['']        // Standard metadata doesn't provide steps
+            ingredients: [''],
+            steps: [''],
+            tags: []
         }
-
-        return metadata
-    } catch (error) {
-        console.error('Metadata extraction error:', error)
-        throw new Error('URLからの情報取得に失敗しました。URLが正しいか確認してください。')
     }
+
+    // If both Search Grounding and CORS proxies failed
+    throw new Error(
+        'URLからレシピを取得できませんでした。対象サイトがアクセス制限されている可能性があります。\n' +
+        '「テキスト・SNSメモから」タブにレシピの文章を貼り付けて解析することをお試しください。'
+    )
 }
 
-/**
- * Validate URL format
- */
 function isValidUrl(string) {
     try {
         const url = new URL(string)
@@ -130,69 +137,45 @@ function isValidUrl(string) {
     }
 }
 
-/**
- * Extract title from document
- * Priority: og:title > twitter:title > title tag
- */
 function extractTitle(doc) {
-    // Try Open Graph
     const ogTitle = doc.querySelector('meta[property="og:title"]')
     if (ogTitle && ogTitle.content) return ogTitle.content
 
-    // Try Twitter Card
     const twitterTitle = doc.querySelector('meta[name="twitter:title"]')
     if (twitterTitle && twitterTitle.content) return twitterTitle.content
 
-    // Try title tag
     const titleTag = doc.querySelector('title')
     if (titleTag && titleTag.textContent) return titleTag.textContent.trim()
 
     return ''
 }
 
-/**
- * Extract description from document
- * Priority: og:description > twitter:description > meta description
- */
 function extractDescription(doc) {
-    // Try Open Graph
     const ogDesc = doc.querySelector('meta[property="og:description"]')
     if (ogDesc && ogDesc.content) return ogDesc.content
 
-    // Try Twitter Card
     const twitterDesc = doc.querySelector('meta[name="twitter:description"]')
     if (twitterDesc && twitterDesc.content) return twitterDesc.content
 
-    // Try meta description
     const metaDesc = doc.querySelector('meta[name="description"]')
     if (metaDesc && metaDesc.content) return metaDesc.content
 
     return ''
 }
 
-/**
- * Extract image URL from document
- * Priority: og:image > twitter:image > first img tag
- */
 function extractImage(doc, baseUrl) {
-    // Try Open Graph
     const ogImage = doc.querySelector('meta[property="og:image"]')
     if (ogImage && ogImage.content) return makeAbsoluteUrl(ogImage.content, baseUrl)
 
-    // Try Twitter Card
     const twitterImage = doc.querySelector('meta[name="twitter:image"]')
     if (twitterImage && twitterImage.content) return makeAbsoluteUrl(twitterImage.content, baseUrl)
 
-    // Try first img tag in article or main content
     const articleImg = doc.querySelector('article img, main img, .content img')
     if (articleImg && articleImg.src) return makeAbsoluteUrl(articleImg.src, baseUrl)
 
     return ''
 }
 
-/**
- * Convert relative URL to absolute URL
- */
 function makeAbsoluteUrl(imageUrl, baseUrl) {
     try {
         return new URL(imageUrl, baseUrl).href

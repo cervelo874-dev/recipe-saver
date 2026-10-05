@@ -1,6 +1,6 @@
 import './MobileNav.css'
 
-export default function MobileNav({ currentView, onHomeClick, onAddClick }) {
+export default function MobileNav({ currentView, onHomeClick, onAddClick, onSettingsClick }) {
     return (
         <nav className="mobile-nav">
             <button
@@ -19,6 +19,15 @@ export default function MobileNav({ currentView, onHomeClick, onAddClick }) {
             >
                 <span className="mobile-nav-icon add-icon">+</span>
                 <span className="mobile-nav-label">追加</span>
+            </button>
+
+            <button
+                className="mobile-nav-item"
+                onClick={onSettingsClick}
+                aria-label="設定"
+            >
+                <span className="mobile-nav-icon">⚙️</span>
+                <span className="mobile-nav-label">設定</span>
             </button>
         </nav>
     )

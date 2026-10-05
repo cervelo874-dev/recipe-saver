@@ -1,6 +1,6 @@
 import './Header.css'
 
-export default function Header({ onAddClick, onLogoClick, searchQuery, onSearchChange, onExport, onImport }) {
+export default function Header({ onAddClick, onLogoClick, searchQuery, onSearchChange, onExport, onImport, onSettingsClick }) {
     return (
         <header className="header">
             <div className="header-content container">
@@ -29,6 +29,16 @@ export default function Header({ onAddClick, onLogoClick, searchQuery, onSearchC
                 </div>
 
                 <div className="header-right">
+                    {/* Settings Button */}
+                    <button
+                        className="btn btn-ghost icon-btn settings-btn"
+                        onClick={onSettingsClick}
+                        title="APIキーと設定"
+                        aria-label="APIキーと設定"
+                    >
+                        <span className="btn-icon">⚙️</span>
+                    </button>
+
                     {/* Export/Import Buttons */}
                     <button
                         className="btn btn-ghost icon-btn"

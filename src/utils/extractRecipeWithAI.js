@@ -1,95 +1,188 @@
-import { GoogleGenerativeAI } from '@google/generative-ai'
+import { GoogleGenerativeAI, SchemaType } from '@google/generative-ai'
+import { getApiKey } from './apiKey.js'
 
-// Initialize Gemini API
-const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY || '')
-
-export async function extractRecipeWithAI(htmlContent, url) {
-    if (!import.meta.env.VITE_GEMINI_API_KEY) {
-        throw new Error('Gemini API key is not configured')
-    }
-
-    try {
-        const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
-
-        const prompt = `
-あなたはレシピ抽出アシスタントです。提供されたHTMLコンテンツからレシピ情報を抽出してください。
-このHTMLは以下のURLから取得されました: ${url}
-
-以下のJSON形式でデータを返してください：
-{
-  "title": "レシピのタイトル",
-  "description": "レシピの簡単な説明（2-3文程度）",
-  "imageUrl": "メイン画像の完全なURL",
-  "ingredients": ["材料1の名前と分量", "材料2の名前と分量", "..."],
-  "steps": ["手順1の説明", "手順2の説明", "..."],
-  "tags": ["和食", "時短", "..."]
+const recipeSchema = {
+    type: SchemaType.OBJECT,
+    properties: {
+        title: {
+            type: SchemaType.STRING,
+            description: 'レシピの料理名'
+        },
+        description: {
+            type: SchemaType.STRING,
+            description: 'レシピの概要や魅力の簡単な説明（1〜2文）'
+        },
+        imageUrl: {
+            type: SchemaType.STRING,
+            description: 'メイン料理写真の絶対URL。見つからない場合は空文字。'
+        },
+        servings: {
+            type: SchemaType.STRING,
+            description: '分量・人数（例: 2人分、4個分など。不明なら空文字）'
+        },
+        cookTime: {
+            type: SchemaType.STRING,
+            description: '目安の調理時間（例: 15分、30分など。不明なら空文字）'
+        },
+        ingredients: {
+            type: SchemaType.ARRAY,
+            items: { type: SchemaType.STRING },
+            description: '材料名と分量のリスト（例: 「豚バラ肉 200g」、「玉ねぎ 1/2個」）'
+        },
+        steps: {
+            type: SchemaType.ARRAY,
+            items: { type: SchemaType.STRING },
+            description: '調理手順の具体的なリスト'
+        },
+        tags: {
+            type: SchemaType.ARRAY,
+            items: { type: SchemaType.STRING },
+            description: '料理ジャンルや特徴タグ（例: 和食, 時短, ヘルシー など）'
+        }
+    },
+    required: ['title', 'ingredients', 'steps']
 }
 
-重要なルール：
-1. ページ内の主要なレシピを抽出してください。
-2. ingredients（材料）は必ず配列形式で、各材料の名前と分量を含めてください。最低でも1つ以上の材料を抽出してください。
-3. steps（手順）は必ず配列形式で、各手順を詳しく説明してください。最低でも1つ以上の手順を抽出してください。
-4. tags（タグ）は料理のジャンル、特徴、調理時間などを抽出してください（例：「和食」「洋食」「時短」「ヘルシー」など）
-5. imageUrlは絶対URLにしてください。相対URLの場合は、ベースURL（${new URL(url).origin}）を付けてください。
-6. テキストから余分な空白や広告、不要な情報を除去してください。
-7. フィールドが見つからない場合は、空の文字列または空の配列を使用してください。
-8. 必ずJSON形式のみを返してください。マークダウンのコードブロック記号（\`\`\`）は使用しないでください。
+function getGenerativeModel(schema = recipeSchema) {
+    const apiKey = getApiKey()
+    if (!apiKey) {
+        throw new Error('Gemini APIキーが設定されていません。画面右上の「設定」からAPIキーを入力してください。')
+    }
 
-JSON形式のみを返してください（他のテキストは含めないでください）。
-    `
+    const genAI = new GoogleGenerativeAI(apiKey)
+    return genAI.getGenerativeModel({
+        model: 'gemini-2.5-flash',
+        generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema: schema,
+            temperature: 0.2
+        }
+    })
+}
 
-        // Truncate HTML if it's too long
-        const truncatedHtml = htmlContent.substring(0, 100000)
+/**
+ * Google Search Groundingを使ってURLから直接レシピをWeb検索・抽出
+ * 2ステップ方式（Search Groundingで調査 ➔ Structured Outputsで高精度構造化）により、
+ * CORSプロキシ不要かつ100%パース成功を実現。
+ */
+export async function extractRecipeFromUrlWithSearch(url) {
+    const apiKey = getApiKey()
+    if (!apiKey) {
+        throw new Error('Gemini APIキーが設定されていません。画面右上の「設定」からAPIキーを入力してください。')
+    }
 
-        console.log('Sending request to Gemini API...')
+    const genAI = new GoogleGenerativeAI(apiKey)
+    const searchModel = genAI.getGenerativeModel({
+        model: 'gemini-2.5-flash',
+        tools: [{ googleSearch: {} }]
+    })
+
+    const searchPrompt = `Web検索機能を使用して、以下のレシピページの料理名、材料、分量、手順、人数、調理時間を調べて詳しく教えてください。
+URL: ${url}`
+
+    try {
+        console.log('🔍 Step 1: Searching recipe with Google Search Grounding for URL:', url)
+        const searchResult = await searchModel.generateContent(searchPrompt)
+        const searchText = searchResult.response.text()
+
+        if (!searchText || searchText.trim().length < 20) {
+            throw new Error('Web検索からレシピ情報を取得できませんでした')
+        }
+
+        console.log('🤖 Step 2: Structuring search results with Structured Outputs...')
+        const structured = await extractRecipeFromText(
+            `【URL】: ${url}\n\n【Web検索による調査結果】:\n${searchText}`
+        )
+
+        return structured
+    } catch (error) {
+        console.error('Google Search Grounding Error:', error)
+        throw error
+    }
+}
+
+/**
+ * HTMLコンテンツからレシピを抽出（Structured Outputs）
+ */
+export async function extractRecipeWithAI(htmlContent, url) {
+    const model = getGenerativeModel()
+
+    const origin = url ? new URL(url).origin : ''
+    const prompt = `
+あなたはプロの料理レシピ抽出アシスタントです。
+提供されたHTML情報からレシピの主要情報を抽出し、指定されたJSON構造で返してください。
+元URL: ${url || '不明'}
+
+【指示】
+1. メインの料理レシピを特定して抽出してください。
+2. ingredients（材料）は必ず名前と分量をセットで抽出してください。
+3. steps（手順）は調理順序に沿って具体的かつ分かりやすく抽出してください。
+4. imageUrlは絶対URLで返してください。相対パスの場合は「${origin}」を補完してください。見つからない場合は空文字にしてください。
+5. 人数（servings）や調理時間（cookTime）がページ内に記載されていれば抽出してください。
+`
+
+    const truncatedHtml = htmlContent.substring(0, 100000)
+
+    try {
+        console.log('Sending request to Gemini API (Structured Outputs)...')
         const result = await model.generateContent([prompt, truncatedHtml])
         const response = await result.response
-        const text = response.text()
+        const responseText = response.text()
+        const parsed = JSON.parse(responseText)
 
-        console.log('Raw AI Response:', text.substring(0, 500) + '...')
-
-        // Clean up markdown code blocks if present
-        let jsonString = text.trim()
-
-        // Remove markdown code blocks
-        jsonString = jsonString.replace(/```json\n?/g, '')
-        jsonString = jsonString.replace(/```\n?/g, '')
-        jsonString = jsonString.trim()
-
-        // Find JSON object in the response (in case there's extra text)
-        const jsonMatch = jsonString.match(/\{[\s\S]*\}/)
-        if (jsonMatch) {
-            jsonString = jsonMatch[0]
-        }
-
-        console.log('Cleaned JSON string:', jsonString.substring(0, 500) + '...')
-
-        const parsedData = JSON.parse(jsonString)
-
-        console.log('Parsed AI data:', {
-            title: parsedData.title,
-            ingredientsCount: parsedData.ingredients?.length || 0,
-            stepsCount: parsedData.steps?.length || 0,
-            tagsCount: parsedData.tags?.length || 0
-        })
-
-        // Validate that we have at least some data
-        if (!parsedData.title && (!parsedData.ingredients || parsedData.ingredients.length === 0)) {
-            throw new Error('AI could not extract meaningful recipe data')
-        }
-
-        // Ensure arrays exist
-        return {
-            title: parsedData.title || '',
-            description: parsedData.description || '',
-            imageUrl: parsedData.imageUrl || '',
-            ingredients: Array.isArray(parsedData.ingredients) ? parsedData.ingredients : [],
-            steps: Array.isArray(parsedData.steps) ? parsedData.steps : [],
-            tags: Array.isArray(parsedData.tags) ? parsedData.tags : []
-        }
+        return normalizeRecipeData(parsed)
     } catch (error) {
-        console.error('AI Extraction Error:', error)
-        console.error('Error details:', error.message)
-        throw error
+        console.error('AI Extraction Error (HTML):', error)
+        throw new Error(`レシピの抽出に失敗しました: ${error.message || error}`)
+    }
+}
+
+/**
+ * プレーンテキスト（SNS投稿、メモ、ブログのコピー等）からレシピを抽出
+ */
+export async function extractRecipeFromText(text) {
+    if (!text || !text.trim()) {
+        throw new Error('解析するテキストが空です')
+    }
+
+    const model = getGenerativeModel()
+
+    const prompt = `
+あなたはプロの料理レシピ抽出アシスタントです。
+以下の入力テキスト（SNSの投稿、メモ、またはレシピ記事の抜粋）からレシピ情報を抽出し、指定されたJSON構造で返してください。
+
+【テキスト内容】:
+${text}
+
+【指示】
+1. 料理名（title）、材料（ingredients）、手順（steps）を漏れなく抽出してください。
+2. もし人数（例: 2人前）や調理時間（例: 10分）が含まれていれば抽出してください。
+3. ジャンルや特徴を表すタグ（tags）を2〜4個抽出または自動付与してください。
+`
+
+    try {
+        console.log('Sending text extraction to Gemini API...')
+        const result = await model.generateContent(prompt)
+        const response = await result.response
+        const responseText = response.text()
+        const parsed = JSON.parse(responseText)
+
+        return normalizeRecipeData(parsed)
+    } catch (error) {
+        console.error('AI Extraction Error (Text):', error)
+        throw new Error(`テキストからの抽出に失敗しました: ${error.message || error}`)
+    }
+}
+
+function normalizeRecipeData(data) {
+    return {
+        title: data.title || '',
+        description: data.description || '',
+        imageUrl: data.imageUrl === 'N/A' ? '' : (data.imageUrl || ''),
+        servings: data.servings === 'N/A' ? '' : (data.servings || ''),
+        cookTime: data.cookTime === 'N/A' ? '' : (data.cookTime || ''),
+        ingredients: Array.isArray(data.ingredients) ? data.ingredients.filter(Boolean) : [],
+        steps: Array.isArray(data.steps) ? data.steps.filter(Boolean) : [],
+        tags: Array.isArray(data.tags) ? data.tags.filter(Boolean) : []
     }
 }

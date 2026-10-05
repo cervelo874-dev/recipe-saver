@@ -188,8 +188,8 @@
 
 @media (max-width: 480px) {
 
-    /* Hide icon buttons on very small screens */
-    .icon-btn {
+    /* Hide export/import icon buttons on very small screens, keep settings */
+    .icon-btn:not(.settings-btn) {
         display: none;
     }
 

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Header from './components/layout/Header'
 import MobileNav from './components/layout/MobileNav'
+import SettingsModal from './components/layout/SettingsModal'
 import RecipeList from './components/recipe/RecipeList'
 import RecipeForm from './components/recipe/RecipeForm'
 import RecipeDetail from './components/recipe/RecipeDetail'
@@ -22,15 +23,18 @@ function App() {
     const [selectedRecipe, setSelectedRecipe] = useState(null)
     const [searchQuery, setSearchQuery] = useState('')
     const [filterTag, setFilterTag] = useState(null)
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false)
 
     const handleAddRecipe = (recipe) => {
-        addRecipe(recipe)
-        setCurrentView('list')
+        const created = addRecipe(recipe)
+        setSelectedRecipe(created)
+        setCurrentView('detail')
     }
 
     const handleUpdateRecipe = (recipe) => {
         updateRecipe(recipe)
-        setCurrentView('list')
+        setSelectedRecipe(recipe)
+        setCurrentView('detail')
     }
 
     const handleViewRecipe = (recipe) => {
@@ -45,6 +49,7 @@ function App() {
 
     const handleDeleteRecipe = (id) => {
         deleteRecipe(id)
+        setSelectedRecipe(null)
         setCurrentView('list')
     }
 
@@ -76,23 +81,30 @@ function App() {
 
     // Filter recipes based on search
     const filteredRecipes = recipes.filter(recipe => {
-        const matchesSearch = recipe.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            recipe.ingredients.some(ing => ing.toLowerCase().includes(searchQuery.toLowerCase()))
-        return matchesSearch
+        const query = searchQuery.toLowerCase().trim()
+        if (!query) return true
+
+        const matchesTitle = recipe.title?.toLowerCase().includes(query)
+        const matchesDescription = recipe.description?.toLowerCase().includes(query)
+        const matchesIngredients = recipe.ingredients?.some(ing => ing.toLowerCase().includes(query))
+        const matchesTags = recipe.tags?.some(tag => tag.toLowerCase().includes(query))
+
+        return matchesTitle || matchesDescription || matchesIngredients || matchesTags
     })
 
     // Get all unique tags
-    const allTags = [...new Set(recipes.flatMap(r => r.tags))]
+    const allTags = [...new Set(recipes.flatMap(r => r.tags || []))]
 
     return (
         <div className="app-layout">
             <Header
-                onAddClick={() => setCurrentView('add')}
+                onAddClick={() => { setSelectedRecipe(null); setCurrentView('add'); }}
                 onLogoClick={() => setCurrentView('list')}
                 searchQuery={searchQuery}
                 onSearchChange={setSearchQuery}
                 onExport={handleExport}
                 onImport={handleImport}
+                onSettingsClick={() => setIsSettingsOpen(true)}
             />
 
             <main className="main-content">
@@ -112,6 +124,7 @@ function App() {
                         <RecipeForm
                             onSubmit={handleAddRecipe}
                             onCancel={() => setCurrentView('list')}
+                            onOpenSettings={() => setIsSettingsOpen(true)}
                         />
                     )}
 
@@ -119,7 +132,8 @@ function App() {
                         <RecipeForm
                             recipe={selectedRecipe}
                             onSubmit={handleUpdateRecipe}
-                            onCancel={() => setCurrentView('list')}
+                            onCancel={() => setCurrentView(selectedRecipe ? 'detail' : 'list')}
+                            onOpenSettings={() => setIsSettingsOpen(true)}
                         />
                     )}
 
@@ -138,7 +152,13 @@ function App() {
             <MobileNav
                 currentView={currentView}
                 onHomeClick={() => setCurrentView('list')}
-                onAddClick={() => setCurrentView('add')}
+                onAddClick={() => { setSelectedRecipe(null); setCurrentView('add'); }}
+                onSettingsClick={() => setIsSettingsOpen(true)}
+            />
+
+            <SettingsModal
+                isOpen={isSettingsOpen}
+                onClose={() => setIsSettingsOpen(false)}
             />
         </div>
     )

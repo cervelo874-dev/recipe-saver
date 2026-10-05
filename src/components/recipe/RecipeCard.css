@@ -159,6 +159,22 @@
     line-height: 1.5;
 }
 
+/* Quick Meta */
+.card-quick-meta {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.card-badge {
+    font-size: 0.725rem;
+    padding: 0.15rem 0.45rem;
+    background-color: #f1f5f9;
+    color: #475569;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
 /* Tags */
 .recipe-card-tags {
     display: flex;

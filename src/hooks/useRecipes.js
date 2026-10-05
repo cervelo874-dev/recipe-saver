@@ -1,23 +1,29 @@
 import { useState, useEffect } from 'react'
 
 export const useRecipes = () => {
-    const [recipes, setRecipes] = useState([])
-
-    // Load recipes from localStorage on mount
-    useEffect(() => {
-        const stored = localStorage.getItem('recipes')
-        if (stored) {
-            try {
-                setRecipes(JSON.parse(stored))
-            } catch (error) {
-                console.error('Failed to load recipes:', error)
+    // Lazy initialization from localStorage to prevent overwriting with []
+    const [recipes, setRecipes] = useState(() => {
+        try {
+            const stored = localStorage.getItem('recipes')
+            if (stored) {
+                const parsed = JSON.parse(stored)
+                if (Array.isArray(parsed)) {
+                    return parsed
+                }
             }
+        } catch (error) {
+            console.error('Failed to load recipes from localStorage:', error)
         }
-    }, [])
+        return []
+    })
 
     // Save recipes to localStorage whenever they change
     useEffect(() => {
-        localStorage.setItem('recipes', JSON.stringify(recipes))
+        try {
+            localStorage.setItem('recipes', JSON.stringify(recipes))
+        } catch (error) {
+            console.error('Failed to save recipes to localStorage:', error)
+        }
     }, [recipes])
 
     const addRecipe = (recipe) => {
@@ -26,9 +32,12 @@ export const useRecipes = () => {
             id: crypto.randomUUID(),
             createdAt: new Date().toISOString(),
             isFavorite: false,
-            viewCount: 0
+            viewCount: 0,
+            servings: recipe.servings || '',
+            cookTime: recipe.cookTime || ''
         }
         setRecipes(prev => [newRecipe, ...prev])
+        return newRecipe
     }
 
     const updateRecipe = (updatedRecipe) => {
@@ -57,7 +66,7 @@ export const useRecipes = () => {
         const dataStr = JSON.stringify({
             recipes,
             exportedAt: new Date().toISOString(),
-            version: '1.0'
+            version: '2.0'
         }, null, 2)
 
         const dataBlob = new Blob([dataStr], { type: 'application/json' })
@@ -76,14 +85,22 @@ export const useRecipes = () => {
 
             // Validate data structure
             if (!Array.isArray(importedRecipes)) {
-                throw new Error('Invalid data format')
+                throw new Error('無効なデータ形式です')
             }
 
-            // Ensure all recipes have required new fields
+            // Ensure all recipes have required fields
             const normalizedRecipes = importedRecipes.map(recipe => ({
                 ...recipe,
+                id: recipe.id || crypto.randomUUID(),
+                title: recipe.title || '無題のレシピ',
+                ingredients: Array.isArray(recipe.ingredients) ? recipe.ingredients : [],
+                steps: Array.isArray(recipe.steps) ? recipe.steps : [],
+                tags: Array.isArray(recipe.tags) ? recipe.tags : [],
                 isFavorite: recipe.isFavorite || false,
-                viewCount: recipe.viewCount || 0
+                viewCount: recipe.viewCount || 0,
+                servings: recipe.servings || '',
+                cookTime: recipe.cookTime || '',
+                createdAt: recipe.createdAt || new Date().toISOString()
             }))
 
             setRecipes(normalizedRecipes)

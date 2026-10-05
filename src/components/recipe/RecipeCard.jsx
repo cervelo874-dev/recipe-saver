@@ -2,6 +2,7 @@ import './RecipeCard.css'
 
 export default function RecipeCard({ recipe, onClick, onToggleFavorite }) {
     const formatDate = (dateString) => {
+        if (!dateString) return ''
         const date = new Date(dateString)
         return date.toLocaleDateString('ja-JP', { year: 'numeric', month: 'short', day: 'numeric' })
     }
@@ -38,7 +39,7 @@ export default function RecipeCard({ recipe, onClick, onToggleFavorite }) {
                     ★
                 </button>
 
-                {recipe.rating && (
+                {recipe.rating > 0 && (
                     <div className="recipe-rating">
                         {[...Array(5)].map((_, i) => (
                             <span key={i} className={i < recipe.rating ? 'star filled' : 'star'}>
@@ -54,6 +55,14 @@ export default function RecipeCard({ recipe, onClick, onToggleFavorite }) {
 
                 {recipe.description && (
                     <p className="recipe-card-description">{recipe.description}</p>
+                )}
+
+                {/* Badges for cookTime and servings */}
+                {(recipe.cookTime || recipe.servings) && (
+                    <div className="card-quick-meta">
+                        {recipe.cookTime && <span className="card-badge">⏱️ {recipe.cookTime}</span>}
+                        {recipe.servings && <span className="card-badge">👥 {recipe.servings}</span>}
+                    </div>
                 )}
 
                 {recipe.tags && recipe.tags.length > 0 && (
