@@ -1,29 +1,42 @@
 import { extractRecipeWithAI, extractRecipeFromUrlWithSearch } from './extractRecipeWithAI.js'
 import { hasApiKey } from './apiKey.js'
 
-// List of CORS proxies to try in order
-const CORS_PROXIES = [
-    {
-        name: 'allOriginsRaw',
-        urlTemplate: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
-    },
-    {
-        name: 'allOriginsGet',
-        urlTemplate: (url) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`
-    },
-    {
-        name: 'codetabs',
-        urlTemplate: (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
+// プロキシ一覧（ローカル環境なら内蔵プロキシ、本番なら外部プロキシ）
+function getProxyList() {
+    const list = []
+
+    // ローカル開発環境の場合、Viteの内蔵プロキシを最優先
+    if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+        list.push({
+            name: 'localViteProxy',
+            urlTemplate: (url) => `/api/proxy?url=${encodeURIComponent(url)}`
+        })
     }
-]
+
+    // 公開CORSプロキシ
+    list.push(
+        {
+            name: 'allOriginsRaw',
+            urlTemplate: (url) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+        },
+        {
+            name: 'allOriginsGet',
+            urlTemplate: (url) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`
+        },
+        {
+            name: 'codetabs',
+            urlTemplate: (url) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`
+        }
+    )
+
+    return list
+}
 
 /**
  * Fetch recipe metadata from a URL.
- * Prioritizes Gemini's Google Search Grounding for CORS-immune web extraction,
- * with fallbacks to CORS proxies and HTML parsing.
- *
- * @param {string} url - The URL to fetch metadata from
- * @returns {Promise<Object>} - Extracted metadata
+ * 1. ローカル環境・プロキシ経由で直接HTMLを取得してAI抽出
+ * 2. プロキシが失敗した場合はGemini Google Search GroundingでWeb検索抽出
+ * 3. エラー時は具体的な理由をユーザーに明示
  */
 export async function fetchMetadata(url) {
     if (!url || !isValidUrl(url)) {
@@ -31,35 +44,15 @@ export async function fetchMetadata(url) {
     }
 
     const apiKeyConfigured = hasApiKey()
-
-    // 1. First priority: Try Gemini Google Search Grounding (Immune to CORS & proxy blocks)
-    if (apiKeyConfigured) {
-        try {
-            console.log('🤖 Attempting AI extraction via Google Search Grounding...')
-            const searchData = await extractRecipeFromUrlWithSearch(url)
-            if (searchData && searchData.title) {
-                console.log('✅ Google Search Grounding extraction successful!', {
-                    title: searchData.title,
-                    ingredients: searchData.ingredients?.length || 0,
-                    steps: searchData.steps?.length || 0
-                })
-                return {
-                    ...searchData,
-                    url
-                }
-            }
-        } catch (searchError) {
-            console.warn('⚠️ Google Search Grounding failed, trying CORS proxy fallback:', searchError.message)
-        }
-    }
-
-    // 2. Second priority: Try fetching HTML via CORS proxies
-    let html = null
     let lastError = null
 
-    for (const proxy of CORS_PROXIES) {
+    // 1. プロキシ経由でHTMLの直接取得を試みる（ローカル内蔵プロキシ優先）
+    let html = null
+    const proxies = getProxyList()
+
+    for (const proxy of proxies) {
         try {
-            console.log(`Trying ${proxy.name} proxy...`)
+            console.log(`Trying ${proxy.name}...`)
             const proxyUrl = proxy.urlTemplate(url)
 
             const controller = new AbortController()
@@ -90,7 +83,7 @@ export async function fetchMetadata(url) {
         }
     }
 
-    // 3. Process HTML if fetched
+    // HTMLが取得できた場合、HTMLをもとにAI抽出
     if (html) {
         if (apiKeyConfigured) {
             try {
@@ -103,11 +96,12 @@ export async function fetchMetadata(url) {
                     }
                 }
             } catch (aiError) {
-                console.warn('HTML AI extraction failed, using DOM fallback:', aiError.message)
+                console.error('HTML AI extraction failed:', aiError)
+                throw aiError // AIエラー（429等）はそのまま上に伝える
             }
         }
 
-        // DOM Fallback
+        // DOM Fallback (APIキー未設定時)
         const parser = new DOMParser()
         const doc = parser.parseFromString(html, 'text/html')
         return {
@@ -121,10 +115,30 @@ export async function fetchMetadata(url) {
         }
     }
 
-    // If both Search Grounding and CORS proxies failed
+    // 2. HTML直接取得が全滅した場合、GeminiのGoogle Search GroundingでWeb検索抽出を試みる
+    if (apiKeyConfigured) {
+        try {
+            console.log('🤖 HTML fetch blocked. Attempting Gemini Google Search Grounding...')
+            const searchData = await extractRecipeFromUrlWithSearch(url)
+            if (searchData && searchData.title) {
+                return {
+                    ...searchData,
+                    url
+                }
+            }
+        } catch (searchError) {
+            console.error('Google Search Grounding failed:', searchError)
+            throw searchError // AIエラーは握りつぶさず伝える
+        }
+    }
+
+    // APIキー未設定でHTML取得も失敗した場合
+    if (!apiKeyConfigured) {
+        throw new Error('対象サイトの直接読み込みが制限されています。画面右上の「設定」からGemini APIキーを設定すると、AIによる直接抽出が利用できます。')
+    }
+
     throw new Error(
-        'URLからレシピを取得できませんでした。対象サイトがアクセス制限されている可能性があります。\n' +
-        '「テキスト・SNSメモから」タブにレシピの文章を貼り付けて解析することをお試しください。'
+        `URLからのレシピ取得に失敗しました（${lastError?.message || '通信タイムアウト'}）。\n「テキスト・SNSメモから」タブにレシピの文章を貼り付けて解析することをお試しください。`
     )
 }
 

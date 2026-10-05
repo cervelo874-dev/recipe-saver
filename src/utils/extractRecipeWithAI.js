@@ -43,14 +43,7 @@ const recipeSchema = {
     required: ['title', 'ingredients', 'steps']
 }
 
-function getGenerativeModel(schema = recipeSchema) {
-    const apiKey = getApiKey()
-    if (!apiKey) {
-        throw new Error('Gemini APIキーが設定されていません。画面右上の「設定」からAPIキーを入力してください。')
-    }
-
-    const modelName = getSelectedModel()
-    const genAI = new GoogleGenerativeAI(apiKey)
+function createModel(genAI, modelName, schema = recipeSchema) {
     return genAI.getGenerativeModel({
         model: modelName,
         generationConfig: {
@@ -62,9 +55,33 @@ function getGenerativeModel(schema = recipeSchema) {
 }
 
 /**
+ * 429エラーやモデル起因のエラー時に安定モデル (gemini-2.5-flash) で自動フォールバック実行
+ */
+async function generateWithFallback(genAI, primaryModelName, executeFn) {
+    try {
+        return await executeFn(primaryModelName)
+    } catch (primaryError) {
+        const errorMsg = primaryError.message || String(primaryError)
+        console.warn(`⚠️ Model [${primaryModelName}] failed (${errorMsg}). Checking fallback...`)
+
+        // 既に gemini-2.5-flash の場合はそのまま再スロー
+        if (primaryModelName === 'gemini-2.5-flash') {
+            throw primaryError
+        }
+
+        // 429 (Quota exceeded) や 404 (Not found) などの場合は gemini-2.5-flash で即座にリトライ
+        console.log('🔄 Automatically falling back to stable model: gemini-2.5-flash...')
+        try {
+            return await executeFn('gemini-2.5-flash')
+        } catch (fallbackError) {
+            console.error('❌ Fallback to gemini-2.5-flash also failed:', fallbackError)
+            throw fallbackError
+        }
+    }
+}
+
+/**
  * Google Search Groundingを使ってURLから直接レシピをWeb検索・抽出
- * 2ステップ方式（Search Groundingで調査 ➔ Structured Outputsで高精度構造化）により、
- * CORSプロキシ不要かつ100%パース成功を実現。
  */
 export async function extractRecipeFromUrlWithSearch(url) {
     const apiKey = getApiKey()
@@ -72,20 +89,23 @@ export async function extractRecipeFromUrlWithSearch(url) {
         throw new Error('Gemini APIキーが設定されていません。画面右上の「設定」からAPIキーを入力してください。')
     }
 
-    const modelName = getSelectedModel()
     const genAI = new GoogleGenerativeAI(apiKey)
-    const searchModel = genAI.getGenerativeModel({
-        model: modelName,
-        tools: [{ googleSearch: {} }]
-    })
+    const primaryModelName = getSelectedModel()
 
     const searchPrompt = `Web検索機能を使用して、以下のレシピページの料理名、材料、分量、手順、人数、調理時間を調べて詳しく教えてください。
 URL: ${url}`
 
     try {
-        console.log('🔍 Step 1: Searching recipe with Google Search Grounding for URL:', url)
-        const searchResult = await searchModel.generateContent(searchPrompt)
-        const searchText = searchResult.response.text()
+        console.log(`🔍 Step 1: Searching recipe with Google Search Grounding for URL: ${url} (model: ${primaryModelName})`)
+
+        const searchText = await generateWithFallback(genAI, primaryModelName, async (modelName) => {
+            const searchModel = genAI.getGenerativeModel({
+                model: modelName,
+                tools: [{ googleSearch: {} }]
+            })
+            const result = await searchModel.generateContent(searchPrompt)
+            return result.response.text()
+        })
 
         if (!searchText || searchText.trim().length < 20) {
             throw new Error('Web検索からレシピ情報を取得できませんでした')
@@ -98,8 +118,8 @@ URL: ${url}`
 
         return structured
     } catch (error) {
-        console.error('Google Search Grounding Error:', error)
-        throw error
+        console.error('Google Search Grounding Pipeline Error:', error)
+        throw formatAiError(error)
     }
 }
 
@@ -107,7 +127,13 @@ URL: ${url}`
  * HTMLコンテンツからレシピを抽出（Structured Outputs）
  */
 export async function extractRecipeWithAI(htmlContent, url) {
-    const model = getGenerativeModel()
+    const apiKey = getApiKey()
+    if (!apiKey) {
+        throw new Error('Gemini APIキーが設定されていません。画面右上の「設定」からAPIキーを入力してください。')
+    }
+
+    const genAI = new GoogleGenerativeAI(apiKey)
+    const primaryModelName = getSelectedModel()
 
     const origin = url ? new URL(url).origin : ''
     const prompt = `
@@ -126,16 +152,18 @@ export async function extractRecipeWithAI(htmlContent, url) {
     const truncatedHtml = htmlContent.substring(0, 100000)
 
     try {
-        console.log('Sending request to Gemini API (Structured Outputs)...')
-        const result = await model.generateContent([prompt, truncatedHtml])
-        const response = await result.response
-        const responseText = response.text()
-        const parsed = JSON.parse(responseText)
+        console.log(`Sending HTML to Gemini API (Structured Outputs, model: ${primaryModelName})...`)
+        const parsed = await generateWithFallback(genAI, primaryModelName, async (modelName) => {
+            const model = createModel(genAI, modelName)
+            const result = await model.generateContent([prompt, truncatedHtml])
+            const responseText = result.response.text()
+            return JSON.parse(responseText)
+        })
 
         return normalizeRecipeData(parsed)
     } catch (error) {
         console.error('AI Extraction Error (HTML):', error)
-        throw new Error(`レシピの抽出に失敗しました: ${error.message || error}`)
+        throw formatAiError(error)
     }
 }
 
@@ -147,7 +175,13 @@ export async function extractRecipeFromText(text) {
         throw new Error('解析するテキストが空です')
     }
 
-    const model = getGenerativeModel()
+    const apiKey = getApiKey()
+    if (!apiKey) {
+        throw new Error('Gemini APIキーが設定されていません。画面右上の「設定」からAPIキーを入力してください。')
+    }
+
+    const genAI = new GoogleGenerativeAI(apiKey)
+    const primaryModelName = getSelectedModel()
 
     const prompt = `
 あなたはプロの料理レシピ抽出アシスタントです。
@@ -163,17 +197,30 @@ ${text}
 `
 
     try {
-        console.log('Sending text extraction to Gemini API...')
-        const result = await model.generateContent(prompt)
-        const response = await result.response
-        const responseText = response.text()
-        const parsed = JSON.parse(responseText)
+        console.log(`Sending text extraction to Gemini API (model: ${primaryModelName})...`)
+        const parsed = await generateWithFallback(genAI, primaryModelName, async (modelName) => {
+            const model = createModel(genAI, modelName)
+            const result = await model.generateContent(prompt)
+            const responseText = result.response.text()
+            return JSON.parse(responseText)
+        })
 
         return normalizeRecipeData(parsed)
     } catch (error) {
         console.error('AI Extraction Error (Text):', error)
-        throw new Error(`テキストからの抽出に失敗しました: ${error.message || error}`)
+        throw formatAiError(error)
     }
+}
+
+function formatAiError(error) {
+    const msg = error.message || String(error)
+    if (msg.includes('429') || msg.includes('quota') || msg.includes('Too Many Requests')) {
+        return new Error('Gemini APIの利用回数制限（429 Quota Exceeded）に達しました。1〜2分お待ちいただくか、設定画面で別のAPIキーをお試しください。')
+    }
+    if (msg.includes('API_KEY_INVALID') || msg.includes('API key not valid')) {
+        return new Error('設定されているGemini APIキーが無効です。画面右上の設定から正しいキーを入力してください。')
+    }
+    return new Error(`レシピの抽出に失敗しました: ${msg}`)
 }
 
 function normalizeRecipeData(data) {
